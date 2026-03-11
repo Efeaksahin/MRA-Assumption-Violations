@@ -2,7 +2,7 @@
 
 # Regression Assumption Simulation
 
-This project explores how violations of classical linear regression assumptions affect parameter estimates and model diagnostics.
+In this project, I explore how violations of classical linear regression assumptions affect parameter estimates and model diagnostics.
 
 Assumptions explored:
 - Normality
@@ -10,6 +10,6 @@ Assumptions explored:
 - Independence
 - Linearity
 
-The project uses simulated datasets to compare how estimated coefficients and model statistics change when each assumption is violated.
+I used simulated datasets to compare how estimated coefficients and model statistics change when each assumption is violated.
 
-See `Assumptions_testing.Rmd` for the full analysis.
+Check the pdf file for a short exploration of how estimated parameters change when assumptions are violated in different ways!
