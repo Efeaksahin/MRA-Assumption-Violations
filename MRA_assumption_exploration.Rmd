@@ -1,0 +1,364 @@
+---
+title: "MRA Assumptions Exploration"
+author: "Efe Aksahin"
+date: "2026-01-13"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = FALSE,
+  message = FALSE,
+  warning = FALSE,
+  fig.align = "center"
+)
+```
+
+# Model building
+
+Linear regression relies on several assumptions. In this project I explore what happens when those assumptions are violated, and more specifically **which estimated quantities change the most** when each violation is introduced in isolation. I focus on:
+
+1. **Linearity**: the conditional mean of the outcome is a linear function of the predictors.
+2. **Normality of errors**: the residuals are normally distributed around zero.
+3. **Homoscedasticity**: the error variance is constant across fitted values.
+4. **Independence of errors**: residuals are uncorrelated across observations.
+
+To study this, I simulate a "perfect" model first and then alter one assumption at a time. For each scenario, I compare the resulting:
+
+- intercept
+- regression coefficients for working memory and IQ
+- standard errors
+- residual standard error
+- $R^2$
+
+I also keep one representative dataset from each scenario to visualize how the assumption is violated.
+
+The data generating model is:
+
+$$
+\text{math\_test}_i = 22 + 0.2\,\text{IQ}_i + 1.1\,\text{WM}_i + \varepsilon_i,
+\qquad i = 1, \dots, n.
+$$
+
+with predictors generated as
+
+$$
+\text{IQ}_i \stackrel{iid}{\sim} \mathcal{N}(100, 15^2),
+\qquad
+\text{WM}_i \stackrel{iid}{\sim} \mathcal{N}(26, 8^2),
+$$
+
+and under the benchmark model,
+
+$$
+\varepsilon_i \stackrel{iid}{\sim} \mathcal{N}(0, 2^2).
+$$
+
+So under the ideal case,
+
+$$
+\text{math\_test}_i \mid (\text{IQ}_i, \text{WM}_i)
+\sim \mathcal{N}\left(22 + 0.2\,\text{IQ}_i + 1.1\,\text{WM}_i, 2^2\right).
+$$
+
+```{r packages}
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(knitr)
+library(patchwork)
+```
+
+```{r simulation-setup}
+set.seed(1334)
+
+n <- 100
+num_iterations <- 3000
+
+true_intercept <- 22
+true_beta_IQ <- 0.2
+true_beta_WM <- 1.1
+```
+
+# Perfect model
+
+```{r perfect-simulation}
+
+coefficients_WM <- numeric(num_iterations)
+coefficients_IQ <- numeric(num_iterations)
+intercepts <- numeric(num_iterations)
+standard_errors_WM <- numeric(num_iterations)
+standard_errors_IQ <- numeric(num_iterations)
+residual_standard_errors <- numeric(num_iterations)
+r_squared <- numeric(num_iterations)
+
+for (i in 1:num_iterations) {
+
+  IQ <- rnorm(n,100,15)
+  WM <- rnorm(n,26,8)
+  error <- rnorm(n,0,2)
+
+  math_test <- true_intercept + true_beta_IQ*IQ + true_beta_WM*WM + error
+
+  data <- data.frame(
+    id = 1:n,
+    math_test = math_test,
+    IQ = IQ,
+    WM = WM
+  )
+
+  model <- lm(math_test ~ WM + IQ , data = data)
+
+  coefficients_WM[i] <- coef(model)["WM"]
+  coefficients_IQ[i] <- coef(model)["IQ"]
+  intercepts[i] <- coef(model)[1]
+  standard_errors_WM[i] <- summary(model)$coefficients["WM","Std. Error"]
+  standard_errors_IQ[i] <- summary(model)$coefficients["IQ","Std. Error"]
+  residual_standard_errors[i] <- summary(model)$sigma
+  r_squared[i] <- summary(model)$r.squared
+
+  if(i==num_iterations){
+    last_data <- data
+    last_model <- model
+  }
+}
+
+parameter_list_perfect <- c(
+mean(coefficients_WM),
+mean(coefficients_IQ),
+mean(intercepts),
+mean(standard_errors_WM),
+mean(standard_errors_IQ),
+mean(residual_standard_errors),
+mean(r_squared)
+)
+```
+
+## Visualizations for the perfect model
+
+```{r fig.width=4, fig.height=3}
+
+p1 <- ggplot(last_data, aes(x = fitted(last_model), y = math_test)) +
+geom_point(alpha=.6)+
+geom_abline(slope=1,intercept=0,linetype="dashed")+
+labs(title="Observed vs Fitted")
+
+p2 <- ggplot(last_data, aes(x=WM,y=math_test))+
+geom_point(alpha=.6)+
+geom_smooth(method="lm")
+
+p3 <- ggplot(last_data, aes(x=IQ,y=math_test))+
+geom_point(alpha=.6)+
+geom_smooth(method="lm")
+
+res_df <- data.frame(resid=resid(last_model))
+
+p4 <- ggplot(res_df,aes(x=resid))+
+geom_histogram(aes(y=after_stat(density)),bins=20)+
+stat_function(fun=dnorm,args=list(mean=mean(res_df$resid),sd=sd(res_df$resid)))
+
+(p1|p2)/(p3|p4)
+```
+
+The plots do not show violations of the key assumptions of multiple regression. The dependent variable and the independent variables have a linear relationship, the errors are approximately normal, and have constant variance across the fitted values.
+
+# Violation of Normality
+
+To violate the normality assumption, I generate skewed errors using an exponential distribution.
+
+```{r, fig.width= 4, fig.height=3}
+
+coeff_WM_norm <- numeric(num_iterations)
+coeff_IQ_norm <- numeric(num_iterations)
+
+for(i in 1:num_iterations){
+
+IQ <- rnorm(n,100,15)
+WM <- rnorm(n,26,8)
+
+error <- rexp(n,1)-1
+
+math_test <- true_intercept + true_beta_IQ*IQ + true_beta_WM*WM + error
+
+data_norm <- data.frame(math_test,IQ,WM)
+
+model_norm <- lm(math_test~WM+IQ,data=data_norm)
+
+coeff_WM_norm[i] <- coef(model_norm)["WM"]
+coeff_IQ_norm[i] <- coef(model_norm)["IQ"]
+
+if(i==num_iterations){
+last_data_norm <- data_norm
+last_model_norm <- model_norm
+}
+
+}
+
+```
+
+```{r, fig.width= 4, fig.height=3}
+
+res_norm <- data.frame(resid=resid(last_model_norm))
+
+ggplot(res_norm,aes(x=resid))+
+geom_histogram(aes(y=after_stat(density)),bins=20)+
+labs(title="Residual distribution under non-normal errors")
+
+```
+
+Even though the residual distribution is clearly skewed, the regression coefficients remain close to the true values. This illustrates that **normality mainly affects inference rather than the coefficient estimates themselves**.
+
+# Violation of Homoscedasticity
+
+Now the variance of the errors increases with working memory.
+
+```{r, fig.width= 4, fig.height=3}
+
+coeff_WM_het <- numeric(num_iterations)
+
+for(i in 1:num_iterations){
+
+IQ <- rnorm(n,100,15)
+WM <- rnorm(n,26,8)
+
+error_sd <- 0.4 + 0.08*WM
+error <- rnorm(n,0,error_sd)
+
+math_test <- true_intercept + true_beta_IQ*IQ + true_beta_WM*WM + error
+
+data_het <- data.frame(math_test,IQ,WM)
+
+model_het <- lm(math_test~WM+IQ,data=data_het)
+
+coeff_WM_het[i] <- coef(model_het)["WM"]
+
+if(i==num_iterations){
+last_data_het <- data_het
+last_model_het <- model_het
+}
+
+}
+
+```
+
+```{r, fig.width= 4, fig.height=3}
+
+ggplot(last_data_het,aes(x=fitted(last_model_het),y=resid(last_model_het)))+
+geom_point(alpha=.6)+
+geom_hline(yintercept=0,linetype="dashed")+
+labs(title="Residual funnel pattern")
+
+```
+
+The funnel shape indicates increasing variance. Again, the coefficients remain largely unbiased, but **standard errors are affected because the model assumes constant variance**.
+
+# Violation of Independence
+
+Autocorrelation is introduced by making each residual depend on the previous residual.
+
+```{r}
+
+coeff_WM_auto <- numeric(num_iterations)
+
+for(i in 1:num_iterations){
+
+IQ <- rnorm(n,100,15)
+WM <- rnorm(n,26,8)
+
+u <- rnorm(n,0,2)
+error <- numeric(n)
+
+error[1] <- u[1]
+
+for(j in 2:n){
+error[j] <- 0.65*error[j-1] + u[j]
+}
+
+math_test <- true_intercept + true_beta_IQ*IQ + true_beta_WM*WM + error
+
+data_auto <- data.frame(math_test,IQ,WM)
+
+model_auto <- lm(math_test~WM+IQ,data=data_auto)
+
+coeff_WM_auto[i] <- coef(model_auto)["WM"]
+
+if(i==num_iterations){
+last_model_auto <- model_auto
+}
+
+}
+
+```
+
+```{r, fig.width= 4, fig.height=3}
+
+res_auto <- data.frame(
+order=1:n,
+res=resid(last_model_auto)
+)
+
+ggplot(res_auto,aes(x=order,y=res))+
+geom_line()+
+geom_hline(yintercept=0,linetype="dashed")+
+labs(title="Autocorrelated residuals")
+
+```
+
+Residuals now show a clear pattern over observations, violating independence.
+
+# Violation of Linearity
+
+Finally, I introduce a quadratic relationship with working memory.
+
+```{r, fig.width= 4, fig.height=3}
+
+coeff_WM_nonlin <- numeric(num_iterations)
+
+for(i in 1:num_iterations){
+
+IQ <- rnorm(n,100,15)
+WM <- rnorm(n,26,8)
+
+error <- rnorm(n,0,2)
+
+math_test <- true_intercept +
+true_beta_IQ*IQ +
+true_beta_WM*WM -
+0.03*(WM-26)^2 +
+error
+
+data_nonlin <- data.frame(math_test,IQ,WM)
+
+model_nonlin <- lm(math_test~WM+IQ,data=data_nonlin)
+
+coeff_WM_nonlin[i] <- coef(model_nonlin)["WM"]
+
+if(i==num_iterations){
+last_data_nonlin <- data_nonlin
+}
+
+}
+
+```
+
+```{r, fig.width= 4, fig.height=3}
+
+ggplot(last_data_nonlin,aes(x=WM,y=math_test))+
+geom_point(alpha=.6)+
+geom_smooth()+
+geom_smooth(method="lm",linetype="dashed")+
+labs(title="True nonlinear relationship")
+
+```
+
+Here the linear regression tries to approximate a curved relationship with a straight line. This leads to **biased slope estimates**, making this assumption violation particularly problematic.
+
+# Overall Conclusion
+
+The simulation illustrates that not all regression assumptions affect the model in the same way.
+
+Violations of **normality**, **homoscedasticity**, and **independence** mainly affect the **uncertainty estimates** of the model. The estimated regression coefficients themselves remain relatively stable, but the standard errors and therefore statistical inference become unreliable.
+
+In contrast, violations of **linearity** directly distort the estimated relationship between predictors and outcome. Because the model attempts to fit a straight line to a nonlinear pattern, the regression coefficients themselves become biased.
+
+This simulation therefore highlights that the most consequential violation for interpreting regression coefficients is typically **misspecification of the mean structure**, while the other assumptions primarily influence the reliability of inference.
